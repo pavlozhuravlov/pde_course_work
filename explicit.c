@@ -2,10 +2,10 @@
 #include <stdio.h>
 #include <math.h>
 
-#define X_GRID_SIZE 4
-#define T_GRID_SIZE 40
+#define X_GRID_SIZE 10
+#define T_GRID_SIZE 300
 
-#define H 1.0 / (double) X_GRID_SIZE     
+#define H 1.0 / (double) (X_GRID_SIZE - 1)     
 #define TAU 1.0 / (double) T_GRID_SIZE   
 
 #define SIGMA TAU / ( H * H )
@@ -30,7 +30,7 @@ int create_matrix(double ***array, int rows, int cols)
 	}
 }
 
-int free_matrix(double ***array, int rows) 
+int free_matrix(double ***array) 
 {
 	free(&(*array)[0][0]);
 	free(*array);
@@ -46,6 +46,8 @@ void print_matrix(double** matrix , int rows, int cols)
             printf("%lf   ", matrix[i][j]);
         }
         printf("\n\n");
+        if (i == 10)
+        	break;
     }
 }
 
@@ -63,7 +65,7 @@ double** calculate_exact_solution_matrix()
 	{
 		for (int i = 0; i < X_GRID_SIZE; ++i)
 		{
-			exact_solution[k][i] = exact_solution_function(i, k);
+			exact_solution[k][i] = exact_solution_function(X_LOWER_BOUND + i * H, T_LOWER_BOUND + k * TAU);
 		}
 	}
 
@@ -182,6 +184,10 @@ int main(int argc, char const *argv[])
 
 	double** residual = calculate_residual_matrix(numerical_solution, exact_solution);
 
+	double** per = calculate_residual_percentage_matrix(residual, exact_solution);
+
+	double avg = calculate_average_matrix_value(per, T_GRID_SIZE, X_GRID_SIZE);
+
 	printf("NUMERICAL\n");
 	printf("__________________________________________\n\n\n");
 	print_matrix(numerical_solution, T_GRID_SIZE, X_GRID_SIZE);
@@ -197,9 +203,17 @@ int main(int argc, char const *argv[])
 	print_matrix(residual, T_GRID_SIZE, X_GRID_SIZE);
 	printf("__________________________________________\n\n");
 
-	free_matrix(&numerical_solution, T_GRID_SIZE);
-	free_matrix(&exact_solution, T_GRID_SIZE);
-	free_matrix(&residual, T_GRID_SIZE);
+	printf("RESIDUAL PERCENTAGE\n");
+	printf("__________________________________________\n\n\n");
+	print_matrix(per, T_GRID_SIZE, X_GRID_SIZE);
+	printf("__________________________________________\n\n");
+
+	printf("AVERAGE %lf\n", avg);
+
+	free_matrix(&per);
+	free_matrix(&numerical_solution);
+	free_matrix(&exact_solution);
+	free_matrix(&residual);
 
 	return 0;
 

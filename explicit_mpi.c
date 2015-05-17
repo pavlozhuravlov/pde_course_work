@@ -1,11 +1,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include "mpi.h"
 
-#define X_GRID_SIZE 4
-#define T_GRID_SIZE 64
+#define X_GRID_SIZE 10
+#define T_GRID_SIZE 300
 
-#define H 1.0 / (double) X_GRID_SIZE     
+#define H 1.0 / (double) (X_GRID_SIZE - 1)    
 #define TAU 1.0 / (double) T_GRID_SIZE   
 
 #define SIGMA TAU / ( H * H )
@@ -23,25 +24,14 @@
 
 int create_matrix(double ***array, int rows, int cols) 
 {
-	int i;
-	double *p = (double*) calloc(rows * cols, sizeof(double));
-	if (!p) return -1;
-
-	(*array) = (double**) malloc(rows * sizeof(double*));
-	
-	if (!(*array)) 
+	*array = (double**)malloc(sizeof(double) * rows);
+	for (int i = 0; i < rows; ++i)
 	{
-	  	free(p);
-	  	return -1;
+		(*array)[i] = calloc(cols, sizeof(double));
 	}
-
-	for (i = 0; i < rows; i++)
-	  	(*array)[i] = &(p[i * cols]);
-
-	return 0;
 }
 
-int free_matrix(double ***array, int rows) 
+int free_matrix(double ***array) 
 {
 	free(&(*array)[0][0]);
 	free(*array);
@@ -50,12 +40,15 @@ int free_matrix(double ***array, int rows)
 
 void print_matrix(double** matrix , int rows, int cols) 
 {
-    for (int i = 0; i < rows; i++) {
+    for (int i = 0; i < rows; i++) 
+    {
         for (int j = 0; j < cols; j++)
         {
             printf("%lf   ", matrix[i][j]);
         }
         printf("\n\n");
+        if (i == 10)
+        	break;
     }
 }
 
@@ -64,141 +57,172 @@ double exact_solution_function(double x, double t)
 	return 1 / sqrt( C * exp( - ( 2 * LAMBDA * ( x + LAMBDA * t) ) / A) - B / ( 3 * LAMBDA) ) ; 
 }
 
-double** calculate_exact_solution_matrix() 
+double** calculate_exact_result() 
 {
-	double** exact_solution;
-	create_matrix(&exact_solution, T_GRID_SIZE, X_GRID_SIZE);
+	double** exact;
+	create_matrix(&exact, T_GRID_SIZE, X_GRID_SIZE);
 
 	for (int k = 0; k < T_GRID_SIZE; ++k)
 	{
 		for (int i = 0; i < X_GRID_SIZE; ++i)
 		{
-			exact_solution[k][i] = exact_solution_function(i, k);
+			exact[k][i] = exact_solution_function(X_LOWER_BOUND + i * H, T_LOWER_BOUND + k * TAU);
 		}
 	}
 
-	return exact_solution;
+	return exact;
 }
 
-double first_difference(double** matrix, int k, int i) 
+double first_difference(double previous, double next) 
 {
-	return (matrix[k][i + 1] - matrix[k][i - 1]) / (2.0 * H);
+	return (next - previous) / (2.0 * H);
 }
 
-double second_difference(double** matrix, int k, int i) 
+double second_difference(double previous, double current, double next) 
 {	
-	return (matrix[k][i - 1] - 2.0 * matrix[k][i] + matrix[k][i + 1]) / (H * H);
+	return (previous - 2.0 * current + next) / (H * H);
 }	
 
-void set_initial_conditions(double** matrix)
+double calculate_next_layer_point(double previous, double current, double next)
 {
-	for (int i = 0; i < X_GRID_SIZE; ++i)
-	{
-		matrix[0][i] = exact_solution_function(X_LOWER_BOUND + i * H, T_LOWER_BOUND);
-	}
+	return current + TAU * ( A * second_difference(previous, current, next) 
+								+ B * current * current * first_difference(previous, next));
 }
 
-void set_boundary_conditions(double** matrix) 
+double** calculate_numerical_result(int rank, int comm_size)
 {
+	double** local_grid;
+	int local_grid_width = X_GRID_SIZE / comm_size;
+
+	if (rank == comm_size - 1)
+		local_grid_width += (X_GRID_SIZE % comm_size);
+
+    create_matrix(&local_grid, T_GRID_SIZE, local_grid_width);
+
+	for (int i = 0; i < local_grid_width; ++i)
+	{
+		double x;
+		if (rank == comm_size - 1)
+			x = X_UPPER_BOUND - H * local_grid_width + H * i;
+		else 
+			x = X_LOWER_BOUND + rank * H * local_grid_width + H * i;
+		local_grid[0][i] = exact_solution_function(x, T_LOWER_BOUND);
+	}
+
 	for (int k = 0; k < T_GRID_SIZE; ++k)
 	{
-		matrix[k][0] = exact_solution_function(X_LOWER_BOUND, T_LOWER_BOUND + k * TAU);
-		matrix[k][X_GRID_SIZE - 1] = exact_solution_function(X_UPPER_BOUND, T_LOWER_BOUND + k * TAU);
+		if (rank == 0)
+			local_grid[k][0] = exact_solution_function(X_LOWER_BOUND, T_LOWER_BOUND + k * TAU);
+		else if (rank == comm_size - 1)
+			local_grid[k][local_grid_width - 1] = exact_solution_function(X_UPPER_BOUND, T_LOWER_BOUND + k * TAU);
 	}
-}	
 
-double calculate_next_layer_point(double** matrix, int k, int i)
-{
-	return matrix[k][i] + TAU * ( A * second_difference(matrix, k, i) 
-								+ B * matrix[k][i] * first_difference(matrix, k, i));
-}
-
-double** calculate_numerical_solution_matrix()
-{
-	double** numerical_solution;
-	create_matrix(&numerical_solution ,T_GRID_SIZE, X_GRID_SIZE);
-
-	set_initial_conditions(numerical_solution);
-	set_boundary_conditions(numerical_solution);
 
 	for (int k = 0; k < T_GRID_SIZE - 1; ++k)
 	{
-		for (int i = 1; i < X_GRID_SIZE - 1; ++i)
-		{
-			numerical_solution[k+1][i] = calculate_next_layer_point(numerical_solution, k, i);
-		}
+		double previous, next;
+
+		if (rank != comm_size - 1)
+			MPI_Send(&(local_grid[k][local_grid_width - 1]), 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
+		if (rank != 0)
+			MPI_Send(&(local_grid[k][0]), 1, MPI_DOUBLE, rank - 1, 1, MPI_COMM_WORLD);
+
+		if (rank != 0)
+			MPI_Recv(&(previous), 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		if (rank != comm_size - 1)
+			MPI_Recv(&(next), 1, MPI_DOUBLE, rank + 1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE	);
+
+		if (rank != comm_size - 1)
+			local_grid[k+1][local_grid_width - 1] = calculate_next_layer_point(local_grid[k][local_grid_width-2], local_grid[k][local_grid_width-1], next);
+
+		for (int i = 1; i < local_grid_width - 1; ++i)
+			local_grid[k+1][i] = calculate_next_layer_point(local_grid[k][i-1], local_grid[k][i], local_grid[k][i+1]);
+		
+		if (rank != 0)
+			local_grid[k+1][0] = calculate_next_layer_point(previous, local_grid[k][0], local_grid[k][1]);
 	}
 
-	return numerical_solution;
+
+	double** global_grid = local_grid;
+	if (rank == 0)
+		create_matrix(&global_grid, T_GRID_SIZE, X_GRID_SIZE);
+	
+	int* counts = malloc(sizeof(int) * comm_size);
+	int* displacements = malloc(sizeof(int) * comm_size);
+
+	counts[0] = X_GRID_SIZE / comm_size;
+	displacements[0] = 0;
+	for (int i = 1; i < comm_size - 1; ++i)
+	{
+		counts[i] = X_GRID_SIZE / comm_size;
+		displacements[i] = displacements[i-1] + counts[i];
+	}
+	counts[comm_size - 1] = counts[comm_size - 2] + (X_GRID_SIZE % comm_size);
+	displacements[comm_size -1] = displacements[comm_size - 2] + counts[comm_size - 1];
+
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	for (int k = 0; k < T_GRID_SIZE; ++k)
+	{
+		MPI_Gatherv(&(local_grid[k][0]), counts[rank], MPI_DOUBLE, 
+					&(global_grid[k][0]), counts, displacements, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	}
+
+	if (rank == 0)
+		print_matrix(global_grid, T_GRID_SIZE, X_GRID_SIZE);
+
+	return global_grid;
 }
 
-double** calculate_residual_matrix(double** numerical_solution, double** exact_solution) 
+double** calculate_errors(double** numerical_result, double** exact_result) 
 {
-	double** residual_matrix;
-	create_matrix(&residual_matrix ,T_GRID_SIZE, X_GRID_SIZE);
+	double** errors;
+	create_matrix(&errors ,T_GRID_SIZE, X_GRID_SIZE);
 
 	for (int k = 0; k < T_GRID_SIZE; ++k)
 	{
 		for (int i = 0; i < X_GRID_SIZE; ++i)
 		{
-			residual_matrix[k][i] = fabs(exact_solution[k][i] - numerical_solution[k][i]);
+			errors[k][i] = fabs(exact_result[k][i] - numerical_result[k][i]) / exact_result[k][i] * 100;
 		}
 	}
 
-	return residual_matrix;
+	return errors;
 }
 
-double** calculate_residual_percentage_matrix(double** residual, double** exact_solution) 
+double calculate_average_error(double** matrix) 
 {
-	double** residual_percentage_matrix;
-	create_matrix(&residual_percentage_matrix ,T_GRID_SIZE, X_GRID_SIZE);
+	double sum, average;
 
 	for (int k = 0; k < T_GRID_SIZE; ++k)
-	{
 		for (int i = 0; i < X_GRID_SIZE; ++i)
-		{
-			residual_percentage_matrix[k][i] = residual[k][i] / exact_solution[k][i];
-		}
-	}
+			sum += matrix[k][i];
+	average = sum / (T_GRID_SIZE * X_GRID_SIZE);
 
-	return residual_percentage_matrix;
+	return average;
 }
 
-int main(int argc, char const *argv[])
+int main(int argc, char **argv)
 {
 
-	printf("Sigma: %f\n", SIGMA);
-	if (SIGMA > 0.5	) 
-	{
-		printf("Sigma must be not greater than 0.5 \n");
-		exit(1);
-	}
+	int rank, comm_size;        
 
-	double** numerical_solution = calculate_numerical_solution_matrix();
+    MPI_Init(&argc, &argv);
 
-	double** exact_solution = calculate_exact_solution_matrix();
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	double** residual = calculate_residual_matrix(numerical_solution, exact_solution);
+	double** numerical_result = calculate_numerical_result(rank, comm_size);
+	double** exact_result = calculate_exact_result();
+	double** errors = calculate_errors(numerical_result, exact_result);
+	double avg = calculate_average_error(errors);
 
-	double** residual_percentage = calculate_residual_percentage_matrix(residual, exact_solution);
+	free_matrix(&numerical_result);
+	free_matrix(&exact_result);
+	free_matrix(&errors);
 
-	printf("NUMERICAL\n");
-	print_matrix(numerical_solution, T_GRID_SIZE, X_GRID_SIZE);
-
-	printf("EXACT\n");
-	print_matrix(exact_solution, T_GRID_SIZE, X_GRID_SIZE);
-
-	printf("RESIDUAL\n");
-	print_matrix(residual, T_GRID_SIZE, X_GRID_SIZE);
-
-	printf("RESIDUAL PERCENTAGE\n");
-	print_matrix(residual_percentage, T_GRID_SIZE, X_GRID_SIZE);
-
-	free_matrix(&numerical_solution, T_GRID_SIZE);
-	free_matrix(&exact_solution, T_GRID_SIZE);
-	free_matrix(&residual, T_GRID_SIZE);
-	free_matrix(&residual_percentage, T_GRID_SIZE);
-
+	MPI_Finalize();
+	
 	return 0;
 
 }
