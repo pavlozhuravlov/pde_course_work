@@ -86,7 +86,7 @@ double second_difference(double previous, double current, double next)
 double calculate_next_layer_point(double previous, double current, double next)
 {
 	return current + TAU * ( A * second_difference(previous, current, next) 
-								+ B * current * current * first_difference(previous, next));
+							+ B * current * current * first_difference(previous, next));
 }
 
 double** calculate_numerical_result(int rank, int comm_size)
@@ -103,7 +103,7 @@ double** calculate_numerical_result(int rank, int comm_size)
 	{
 		double x;
 		if (rank == comm_size - 1)
-			x = X_UPPER_BOUND - H * local_grid_width + H * i;
+			x = X_UPPER_BOUND - H * (local_grid_width - 1) + H * i;
 		else 
 			x = X_LOWER_BOUND + rank * H * local_grid_width + H * i;
 		local_grid[0][i] = exact_solution_function(x, T_LOWER_BOUND);
@@ -158,7 +158,7 @@ double** calculate_numerical_result(int rank, int comm_size)
 		displacements[i] = displacements[i-1] + counts[i];
 	}
 	counts[comm_size - 1] = counts[comm_size - 2] + (X_GRID_SIZE % comm_size);
-	displacements[comm_size -1] = displacements[comm_size - 2] + counts[comm_size - 1];
+	displacements[comm_size -1] = displacements[comm_size - 2] + counts[comm_size - 2];
 
 	MPI_Barrier(MPI_COMM_WORLD);
 
@@ -168,8 +168,18 @@ double** calculate_numerical_result(int rank, int comm_size)
 					&(global_grid[k][0]), counts, displacements, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 	}
 
-	if (rank == 0)
-		print_matrix(global_grid, T_GRID_SIZE, X_GRID_SIZE);
+	// for (int i = 0; i < comm_size; ++i)
+	// {
+	// 	if (rank == i)
+	// 	{
+	// 		printf("LOCAL GRID: RANK #%d\n", rank);
+	// 		printf("__________________________________________\n\n\n");
+	// 		print_matrix(local_grid, T_GRID_SIZE, local_grid_width);
+	// 		printf("__________________________________________\n\n");
+	// 	}
+	// 	MPI_Barrier(MPI_COMM_WORLD);
+	// }
+
 
 	return global_grid;
 }
@@ -180,13 +190,8 @@ double** calculate_errors(double** numerical_result, double** exact_result)
 	create_matrix(&errors ,T_GRID_SIZE, X_GRID_SIZE);
 
 	for (int k = 0; k < T_GRID_SIZE; ++k)
-	{
 		for (int i = 0; i < X_GRID_SIZE; ++i)
-		{
 			errors[k][i] = fabs(exact_result[k][i] - numerical_result[k][i]) / exact_result[k][i] * 100;
-		}
-	}
-
 	return errors;
 }
 
@@ -212,14 +217,35 @@ int main(int argc, char **argv)
     MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	double** numerical_result = calculate_numerical_result(rank, comm_size);
-	double** exact_result = calculate_exact_result();
-	double** errors = calculate_errors(numerical_result, exact_result);
-	double avg = calculate_average_error(errors);
+    double** numerical_result = calculate_numerical_result(rank, comm_size);
 
-	free_matrix(&numerical_result);
-	free_matrix(&exact_result);
-	free_matrix(&errors);
+    if (rank == 0)
+    {
+		double** exact_result = calculate_exact_result();
+		double** errors = calculate_errors(numerical_result, exact_result);
+		double avg = calculate_average_error(errors);
+
+		printf("NUMERICAL\n");
+		printf("__________________________________________\n\n\n");
+		print_matrix(numerical_result, T_GRID_SIZE, X_GRID_SIZE);
+		printf("__________________________________________\n\n");
+
+		printf("EXACT\n");
+		printf("__________________________________________\n\n\n");
+		print_matrix(exact_result, T_GRID_SIZE, X_GRID_SIZE);
+		printf("__________________________________________\n\n");
+
+		printf("ERRORS\n");
+		printf("__________________________________________\n\n\n");
+		print_matrix(errors, T_GRID_SIZE, X_GRID_SIZE);
+		printf("__________________________________________\n\n");
+
+		printf("AVERAGE %lf\n", avg);
+
+		free_matrix(&numerical_result);
+		free_matrix(&exact_result);
+		free_matrix(&errors);
+    }
 
 	MPI_Finalize();
 	
