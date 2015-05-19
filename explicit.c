@@ -2,11 +2,11 @@
 #include <stdio.h>
 #include <math.h>
 
-#define X_GRID_SIZE 10
-#define T_GRID_SIZE 300
+#define X_GRID_SIZE 20
+#define T_GRID_SIZE 800
 
-#define H 1.0 / (double) X_GRID_SIZE    
-#define TAU 1.0 / (double) T_GRID_SIZE   
+#define H (X_UPPER_BOUND - X_LOWER_BOUND) / (X_GRID_SIZE - 1.0)    
+#define TAU (T_UPPER_BOUND - T_LOWER_BOUND) / (T_GRID_SIZE - 1.0)
 
 #define SIGMA TAU / ( H * H )
 
@@ -42,8 +42,6 @@ void print_matrix(double** matrix , int rows, int cols)
         for (int j = 0; j < cols; j++)
             printf("%lf   ", matrix[i][j]);
         printf("\n\n");
-        // if (i == 10)
-        // 	break;
     }
 }
 
@@ -76,7 +74,7 @@ double second_difference(double previous, double current, double next)
 
 void set_initial_conditions(double** matrix)
 {
-	for (int i = 0; i < X_GRID_SIZE + 1; ++i)
+	for (int i = 0; i < X_GRID_SIZE; ++i)
 		matrix[0][i] = exact_solution_function(X_LOWER_BOUND + i * H, T_LOWER_BOUND);
 }
 
@@ -85,7 +83,7 @@ void set_boundary_conditions(double** matrix)
 	for (int k = 0; k < T_GRID_SIZE; ++k)
 	{
 		matrix[k][0] = exact_solution_function(X_LOWER_BOUND, T_LOWER_BOUND + k * TAU);
-		matrix[k][X_GRID_SIZE] = exact_solution_function(X_UPPER_BOUND, T_LOWER_BOUND + k * TAU);
+		matrix[k][X_GRID_SIZE-1] = exact_solution_function(X_UPPER_BOUND, T_LOWER_BOUND + k * TAU);
 	}
 }
 
@@ -106,7 +104,7 @@ double** calculate_numerical_result()
 	double x = 0;
 
 	for (int k = 0; k < T_GRID_SIZE - 1; ++k)
-		for (int i = 1; i < X_GRID_SIZE; ++i)
+		for (int i = 1; i < X_GRID_SIZE - 1; ++i)
 			grid[k+1][i] = calculate_next_layer_point(grid[k][i-1], grid[k][i], grid[k][i+1], x);
 
 	return grid;
@@ -118,7 +116,7 @@ double** calculate_exact_result()
 	create_matrix(&exact, T_GRID_SIZE, X_GRID_SIZE + 1);
 
 	for (int k = 0; k < T_GRID_SIZE; ++k)
-		for (int i = 0; i < X_GRID_SIZE + 1; ++i)
+		for (int i = 0; i < X_GRID_SIZE; ++i)
 			exact[k][i] = exact_solution_function(X_LOWER_BOUND + i * H, T_LOWER_BOUND + k * TAU);
 
 	return exact;
@@ -130,7 +128,7 @@ double** calculate_errors(double** numerical_result, double** exact_result)
 	create_matrix(&errors ,T_GRID_SIZE, X_GRID_SIZE);
 
 	for (int k = 0; k < T_GRID_SIZE; ++k)
-		for (int i = 0; i < X_GRID_SIZE + 1; ++i)
+		for (int i = 0; i < X_GRID_SIZE; ++i)
 			errors[k][i] = fabs(exact_result[k][i] - numerical_result[k][i]) / exact_result[k][i] * 100;
 	return errors;
 }
@@ -139,10 +137,10 @@ double calculate_average_error(double** matrix)
 {
 	double sum, average;
 
-	for (int k = 0; k < T_GRID_SIZE; ++k)
-		for (int i = 0; i < X_GRID_SIZE + 1; ++i)
+	for (int k = 1; k < T_GRID_SIZE; ++k)
+		for (int i = 1; i < X_GRID_SIZE-1; ++i)
 			sum += matrix[k][i];
-	average = sum / (T_GRID_SIZE * X_GRID_SIZE + 1);
+	average = sum / ((T_GRID_SIZE-1) * (X_GRID_SIZE-2));
 
 	return average;
 }
@@ -164,13 +162,13 @@ int main(int argc, char const *argv[])
 	double avg = calculate_average_error(errors);
 
 	printf("\nNUMERICAL\n\n\n");
-	print_matrix(numerical_result, T_GRID_SIZE, X_GRID_SIZE + 1);
+	// print_matrix(numerical_result, T_GRID_SIZE, X_GRID_SIZE);
 
 	printf("\nEXACT\n\n\n");
-	print_matrix(exact_result, T_GRID_SIZE, X_GRID_SIZE + 1);
+	// print_matrix(exact_result, T_GRID_SIZE, X_GRID_SIZE);
 
 	printf("\nERRORS\n\n\n");
-	print_matrix(errors, T_GRID_SIZE, X_GRID_SIZE + 1);
+	// print_matrix(errors, T_GRID_SIZE, X_GRID_SIZE);
 
 	printf("\nAVERAGE ERROR: %lf\n\n", avg);
 
