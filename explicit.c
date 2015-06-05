@@ -5,15 +5,18 @@
 #define X_GRID_SIZE 4
 #define T_GRID_SIZE 40
 
-#define H 1.0 / (double) X_GRID_SIZE     
+#define H 1.0 / (double) (X_GRID_SIZE - 1)    
 #define TAU 1.0 / (double) T_GRID_SIZE   
 
 #define SIGMA TAU / ( H * H )
-
-#define A 1.0
-#define B -9.0
+	
+#define A -1.0
+#define B 1.0
 #define C 1.0
-#define LAMBDA 1.0
+#define LAMBDA -1.0
+
+#define BETA sqrt( -B / A )
+#define MYU sqrt( A * LAMBDA / 2.0)
 
 #define X_LOWER_BOUND 0.0
 #define X_UPPER_BOUND 1.0
@@ -21,15 +24,17 @@
 #define T_LOWER_BOUND 0.0
 #define T_UPPER_BOUND 1.0
 
+// Init matrix
 int create_matrix(double ***array, int rows, int cols) 
 {
-	*array = (double**)malloc(sizeof(double) * rows);
+	*array = (double**) malloc(sizeof(double) * rows);
 	for (int i = 0; i < rows; ++i)
 	{
 		(*array)[i] = calloc(cols, sizeof(double));
 	}
 }
 
+// Clear matrix
 int free_matrix(double ***array, int rows) 
 {
 	free(&(*array)[0][0]);
@@ -37,6 +42,7 @@ int free_matrix(double ***array, int rows)
 	return 0;
 }
 
+// Show matrix
 void print_matrix(double** matrix , int rows, int cols) 
 {
     for (int i = 0; i < rows; i++) 
@@ -49,11 +55,13 @@ void print_matrix(double** matrix , int rows, int cols)
     }
 }
 
+// Solve exact soluction
 double exact_solution_function(double x, double t) 
 {
-	return 1 / sqrt( C * exp( - ( 2 * LAMBDA * ( x + LAMBDA * t) ) / A) - B / ( 3 * LAMBDA) ) ; 
+	return (-2 / LAMBDA) * log( BETA + C * exp(MYU*x - 0.5*A*LAMBDA*t ) ) ; 
 }
 
+// Calculate exact solution matrix
 double** calculate_exact_solution_matrix() 
 {
 	double** exact_solution;
@@ -63,23 +71,26 @@ double** calculate_exact_solution_matrix()
 	{
 		for (int i = 0; i < X_GRID_SIZE; ++i)
 		{
-			exact_solution[k][i] = exact_solution_function(i, k);
+			exact_solution[k][i] = exact_solution_function(X_LOWER_BOUND + i * H, T_LOWER_BOUND + k * TAU);
 		}
 	}
 
 	return exact_solution;
 }
 
+// First derivative
 double first_difference(double** matrix, int k, int i) 
 {
 	return (matrix[k][i + 1] - matrix[k][i - 1]) / (2.0 * H);
 }
 
+// Second derivative
 double second_difference(double** matrix, int k, int i) 
 {	
 	return (matrix[k][i - 1] - 2.0 * matrix[k][i] + matrix[k][i + 1]) / (H * H);
 }	
 
+// Initial conditions
 void set_initial_conditions(double** matrix)
 {
 	for (int i = 0; i < X_GRID_SIZE; ++i)
@@ -88,6 +99,7 @@ void set_initial_conditions(double** matrix)
 	}
 }
 
+// Boundary conditions
 void set_boundary_conditions(double** matrix) 
 {
 	for (int k = 0; k < T_GRID_SIZE; ++k)
@@ -97,12 +109,13 @@ void set_boundary_conditions(double** matrix)
 	}
 }	
 
+// Next layer point
 double calculate_next_layer_point(double** matrix, int k, int i)
 {
-	return matrix[k][i] + TAU * ( A * second_difference(matrix, k, i) 
-								+ B * matrix[k][i] * matrix[k][i] * first_difference(matrix, k, i));
+	return matrix[k][i] + TAU * ( second_difference(matrix, k, i) + A + B * exp ( LAMBDA * matrix[k][i] ) );
 }
 
+// Numerical solution
 double** calculate_numerical_solution_matrix()
 {
 	double** numerical_solution;
@@ -166,10 +179,12 @@ double calculate_average_matrix_value(double** matrix, int rows, int cols)
 	return average;
 }
 
+// Print main matrix
 int main(int argc, char const *argv[])
 {
 
 	printf("Sigma: %f\n", SIGMA);
+	
 	if (SIGMA > 0.5	) 
 	{
 		printf("Sigma must be not greater than 0.5 \n");
@@ -177,10 +192,11 @@ int main(int argc, char const *argv[])
 	}
 
 	double** numerical_solution = calculate_numerical_solution_matrix();
-
 	double** exact_solution = calculate_exact_solution_matrix();
-
 	double** residual = calculate_residual_matrix(numerical_solution, exact_solution);
+	
+	// double** procent_matrix = calculate_residual_percentage_matrix(residual, exact_solution);
+	// double average = calculate_average_matrix_value(procent_matrix, T_GRID_SIZE, X_GRID_SIZE);
 
 	printf("NUMERICAL\n");
 	printf("__________________________________________\n\n\n");
@@ -196,6 +212,16 @@ int main(int argc, char const *argv[])
 	printf("__________________________________________\n\n\n");
 	print_matrix(residual, T_GRID_SIZE, X_GRID_SIZE);
 	printf("__________________________________________\n\n");
+
+	// printf("PROCENT MATRIX\n");
+	// printf("__________________________________________\n\n\n");
+	// printf("%lf\n", average);
+	// printf("__________________________________________\n\n");
+
+	// printf("PROCENT MATRIX\n");
+	// printf("__________________________________________\n\n\n");
+	// print_matrix(procent_matrix, T_GRID_SIZE, X_GRID_SIZE);
+	// printf("__________________________________________\n\n");
 
 	free_matrix(&numerical_solution, T_GRID_SIZE);
 	free_matrix(&exact_solution, T_GRID_SIZE);
